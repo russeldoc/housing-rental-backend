@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from pwdlib import PasswordHash
+from pwdlib.hashers.bcrypt import BcryptHasher
+from pwdlib.hashers.argon2 import Argon2Hasher
+
 from sqlalchemy.orm import Session
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -24,7 +27,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-password_hash = PasswordHash.recommended()
+password_hash = PasswordHash([
+    BcryptHasher(),
+    Argon2Hasher(),
+])
 
 security = HTTPBearer()
 

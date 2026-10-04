@@ -7,6 +7,7 @@ import models
 from auth import router as auth_router
 from properties import router as properties_router
 from rental_requests import router as rental_requests_router
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(
@@ -15,6 +16,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 def create_tables():
