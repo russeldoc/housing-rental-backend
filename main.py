@@ -8,6 +8,7 @@ from auth import router as auth_router
 from properties import router as properties_router
 from rental_requests import router as rental_requests_router
 from fastapi.middleware.cors import CORSMiddleware
+from users import router as users_router
 
 
 app = FastAPI(
@@ -36,6 +37,7 @@ def create_tables():
 app.include_router(auth_router)
 app.include_router(properties_router)
 app.include_router(rental_requests_router)
+app.include_router(users_router)
 
 
 @app.get("/")

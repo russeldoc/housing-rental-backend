@@ -15,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 import models
 import schemas
+import secrets
 from database import get_db
 
 load_dotenv()
@@ -25,6 +26,7 @@ if not SECRET_KEY:
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 password_hash = PasswordHash([
@@ -46,6 +48,9 @@ def get_current_user(
             SECRET_KEY,
             algorithms=[ALGORITHM],
         )
+
+        if payload.get("type") != "access":
+            raise ValueError("Invalid token type")
 
         subject = payload.get("sub")
 
@@ -86,10 +91,44 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+
 class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
     access_token: str
     token_type: str
 
+def create_token(user: models.User, token_type: str, expires_delta: timedelta):
+    expires_at = datetime.now(timezone.utc) + expires_delta
+
+    payload = {
+        "sub": str(user.id),
+        "role": user.role,
+        "type": token_type,
+        "exp": expires_at,
+    }
+
+    return jwt.encode(
+        payload,
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
 
 @router.post(
     "/register",
@@ -168,25 +207,177 @@ def login_user(
             detail="This account is inactive.",
         )
 
-    expires_at = datetime.now(timezone.utc) + timedelta(
+    access_token = create_token(
+    user=user,
+    token_type="access",
+    expires_delta=timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+        ),
     )
 
-    access_token = jwt.encode(
+    refresh_token = create_token(
+        user=user,
+        token_type="refresh",
+        expires_delta=timedelta(
+            days=REFRESH_TOKEN_EXPIRE_DAYS
+        ),
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+def refresh_access_token(
+    refresh_data: RefreshRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = jwt.decode(
+            refresh_data.refresh_token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+        )
+
+        if payload.get("type") != "refresh":
+            raise ValueError("Invalid token type")
+
+        subject = payload.get("sub")
+
+        if subject is None:
+            raise ValueError("Missing user ID")
+
+        user_id = int(subject)
+
+    except (jwt.InvalidTokenError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == user_id)
+        .first()
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is inactive.",
+        )
+
+    new_access_token = create_token(
+        user=user,
+        token_type="access",
+        expires_delta=timedelta(
+            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+        ),
+    )
+
+    return {
+        "access_token": new_access_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    request: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == str(request.email))
+        .first()
+    )
+
+    # Generic response avoids revealing whether an account exists.
+    if user is None:
+        return {
+            "message": "If the account exists, reset instructions have been generated."
+        }
+
+    reset_token = jwt.encode(
         {
             "sub": str(user.id),
-            "role": user.role,
-            "exp": expires_at,
+            "type": "password_reset",
+            "jti": secrets.token_urlsafe(16),
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
         },
         SECRET_KEY,
         algorithm=ALGORITHM,
     )
 
+    # DEVELOPMENT ONLY: never return reset tokens in production.
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
+        "message": "Development reset token generated.",
+        "reset_token": reset_token,
     }
 
+
+@router.post("/reset-password")
+def reset_password(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    if len(request.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Password must be at least 8 characters long.",
+        )
+
+    try:
+        payload = jwt.decode(
+            request.reset_token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+        )
+
+        if payload.get("type") != "password_reset":
+            raise ValueError("Invalid token type")
+
+        subject = payload.get("sub")
+        if subject is None:
+            raise ValueError("Missing user ID")
+
+        user_id = int(subject)
+
+    except (jwt.InvalidTokenError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password-reset token.",
+        )
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == user_id)
+        .first()
+    )
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to reset this account's password.",
+        )
+
+    user.hashed_password = password_hash.hash(request.new_password)
+    db.commit()
+
+    return {
+        "message": "Password reset successfully. You can now log in."
+    }
 
 @router.get("/me", response_model=schemas.UserResponse)
 def read_current_user(
