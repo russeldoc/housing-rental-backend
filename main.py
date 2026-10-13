@@ -21,7 +21,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://housing-rental-frontend.vercel.app",  # 👈 Added your Vercel URL (NO trailing slash)
+        "https://housing-rental-frontend-57s2moqh4-russeldoc.vercel.app",  # 👈 Added your Vercel URL (NO trailing slash)
     ],
     allow_credentials=True,
     allow_methods=["*"],
