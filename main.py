@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI
 from sqlalchemy import text
 
@@ -22,6 +21,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://housing-rental-frontend.vercel.app",  # 👈 Added your Vercel URL (NO trailing slash)
     ],
     allow_credentials=True,
     allow_methods=["*"],
