@@ -182,6 +182,7 @@ def create_rental_request(
     response_model=PaginatedRentalRequestResponse,
 )
 def get_my_rental_requests(
+    property_id: int | None = Query(default=None, ge=1),
     search: str | None = Query(default=None, min_length=1, max_length=100),
     request_status: Literal["pending", "approved", "rejected"] | None = None,
     start_date: date | None = None,
@@ -195,6 +196,12 @@ def get_my_rental_requests(
     query = db.query(models.RentalRequest).filter(
         models.RentalRequest.tenant_id == tenant.id
     )
+
+    # NEW: filter by property when the frontend sends property_id
+    if property_id is not None:
+        query = query.filter(
+            models.RentalRequest.property_id == property_id
+        )
 
     if search:
         search_term = f"%{search.strip()}%"
