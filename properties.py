@@ -44,6 +44,7 @@ def get_properties(
     min_rent: float | None = Query(default=None, ge=0),
     max_rent: float | None = Query(default=None, ge=0),
     is_available: bool = Query(default=True),
+    include_unavailable: bool = Query(default=False),
     sort_by: Literal[
         "newest",
         "title_asc",
@@ -56,10 +57,11 @@ def get_properties(
 ):
     query = db.query(models.Property)
 
-    # Filter by availability.
-    query = query.filter(
-        models.Property.is_available.is_(is_available)
-    )
+    # Filter by availability, unless the caller wants everything.
+    if not include_unavailable:
+        query = query.filter(
+            models.Property.is_available.is_(is_available)
+        )
 
     # Search by property title or location.
     if search:
